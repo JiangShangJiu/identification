@@ -27,8 +27,9 @@ def main():
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--n-periods", type=int, default=3)
     parser.add_argument("--dt", type=float, default=0.001)
-    parser.add_argument("--plot", action="store_true", help="保存采集力矩与辨识力矩 H·π̂ 对比图（同轨迹）")
-    parser.add_argument("--plot-out", type=str, default="torque_compare.png", help="力矩对比图输出路径")
+    parser.add_argument("--plot", action="store_true", help="采集力矩与辨识力矩 H·π̂ 对比图（同轨迹）：弹窗显示并保存")
+    parser.add_argument("--plot-out", type=str, default="torque_compare.png", help="力矩对比图保存路径")
+    parser.add_argument("--plot-no-show", action="store_true", help="不弹窗，仅保存到 --plot-out（无图形界面时用）")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -99,6 +100,7 @@ def main():
             result["pi_identified"],
             dof=7,
             out_path=args.plot_out,
+            show=not args.plot_no_show,
             verbose=True,
         )
 

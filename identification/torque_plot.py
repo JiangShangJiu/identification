@@ -32,16 +32,21 @@ def plot_measured_vs_identified_torque(
     pi_identified: np.ndarray,
     dof: int = 7,
     out_path: str | None = "torque_compare.png",
+    show: bool = True,
     verbose: bool = True,
 ) -> dict:
     """
     在同一组 (q, qd, qdd) 下对比：
     - 采集力矩：仿真 mj_inverse 得到的 τ（及可选噪声）
     - 辨识力矩：τ_hat = H(q,qd,qdd)·π̂
+
+    Args:
+        show: True 时弹出窗口（需图形环境）；False 时仅用 Agg 保存文件。
     """
     import matplotlib
 
-    matplotlib.use("Agg")
+    if not show:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     tau_meas = np.asarray(data["tau"])
@@ -69,10 +74,12 @@ def plot_measured_vs_identified_torque(
     fig.tight_layout()
     if out_path:
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show(block=True)
     plt.close(fig)
 
     if verbose:
-        print(f"  力矩对比图: {out_path}")
+        print(f"  力矩对比图: {out_path}" + ("（已显示）" if show else ""))
         print(f"  力矩 RMSE (全关节堆叠): {stats['rmse_all']:.6e} Nm")
         for j in range(dof):
             print(f"    关节 {j + 1} RMSE: {stats['rmse_per_joint'][j]:.6e} Nm")
