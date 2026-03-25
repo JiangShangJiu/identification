@@ -1,0 +1,5 @@
+numpy>=1.20.0
+scipy>=1.7.0
+sympy>=1.10
+mujoco>=3.0.0
+matplotlib>=3.5.0
