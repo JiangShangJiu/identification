@@ -15,7 +15,10 @@ from identification.simulation.config import SimulationConfig
 def main():
     parser = argparse.ArgumentParser(description="采集 MuJoCo 辨识数据")
     parser.add_argument("--harmonic", action="store_true", help="多谐波激励轨迹")
-    parser.add_argument("--noise", action="store_true", help="力矩加高斯噪声")
+    parser.add_argument("--noise", action="store_true", help="力矩加随机噪声（高斯+拉普拉斯混合）")
+    parser.add_argument("--noise-sigma", type=float, default=None, help="高斯分量标准差 (Nm)")
+    parser.add_argument("--noise-seed", type=int, default=None, help="噪声随机种子")
+    parser.add_argument("--noise-gaussian-only", action="store_true", help="仅高斯白噪声")
     parser.add_argument("--model-root", type=str, default=None)
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--n-periods", type=int, default=3)
@@ -31,6 +34,9 @@ def main():
         use_harmonic=args.harmonic,
         n_periods=args.n_periods,
         add_noise=args.noise,
+        noise_sigma=args.noise_sigma,
+        noise_mix_laplace=not args.noise_gaussian_only,
+        noise_seed=args.noise_seed,
         verbose=True,
     )
     save_data(data, args.save)

@@ -23,7 +23,10 @@ def collect_data(
     n_periods: int = 3,
     trajectory_type: str = "sine",
     add_noise: bool = False,
-    noise_sigma: float = 0.5,
+    noise_sigma: float | None = None,
+    noise_mix_laplace: bool = True,
+    noise_laplace_ratio: float = 0.55,
+    noise_seed: int | None = None,
     trajectory_factory=None,
     verbose: bool = True,
 ) -> dict:
@@ -37,7 +40,11 @@ def collect_data(
         use_harmonic: 是否用多谐波轨迹
         n_periods: 多谐波周期数
         trajectory_type: sine|polynomial|random（非 harmonic 时）
-        add_noise, noise_sigma: 力矩噪声
+        add_noise: 是否在力矩上加随机噪声
+        noise_sigma: 高斯分量标准差 (Nm)，默认取 config.torque_noise_sigma
+        noise_mix_laplace: 是否再叠加拉普拉斯噪声（更重尾、抖动更“乱”）
+        noise_laplace_ratio: 拉普拉斯尺度 = sigma * 该系数
+        noise_seed: 随机种子；None 表示每次运行噪声不同
         trajectory_factory: 自定义轨迹生成函数 (duration, dt) -> (t, q, qd, qdd)
         verbose: 是否打印
 
@@ -87,10 +94,17 @@ def collect_data(
         tau_arr[i] = data.qfrc_inverse[:dof]
 
     if add_noise:
-        sigma = noise_sigma or cfg.torque_noise_sigma
-        tau_arr += np.random.normal(0, sigma, tau_arr.shape)
+        sigma = noise_sigma if noise_sigma is not None else cfg.torque_noise_sigma
+        rng = np.random.default_rng(noise_seed)
+        noise = rng.normal(0.0, sigma, tau_arr.shape)
+        if noise_mix_laplace:
+            b = sigma * noise_laplace_ratio
+            noise = noise + rng.laplace(0.0, b, tau_arr.shape)
+        tau_arr += noise
         if verbose:
-            print(f"  力矩加噪: sigma={sigma} Nm")
+            extra = f"+ Laplace(0,{sigma * noise_laplace_ratio:.3f})" if noise_mix_laplace else ""
+            seed_info = f", seed={noise_seed}" if noise_seed is not None else ", seed=None(每次不同)"
+            print(f"  力矩加噪: N(0,{sigma}^2) {extra}{seed_info}")
 
     return {
         "time": t_arr,

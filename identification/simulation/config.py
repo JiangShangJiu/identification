@@ -11,7 +11,7 @@ class SimulationConfig:
     model_path: str | Path = "scene.xml"
     model_root: str | Path | None = None
     dof: int = 7
-    torque_noise_sigma: float = 0.5
+    torque_noise_sigma: float = 2.0
 
     def resolve_model_root(self) -> Path:
         """解析模型根目录"""

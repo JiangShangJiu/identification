@@ -19,7 +19,10 @@ from identification.compare import compare
 def main():
     parser = argparse.ArgumentParser(description="Franka Panda 动力学参数辨识")
     parser.add_argument("--harmonic", action="store_true", help="多谐波激励轨迹")
-    parser.add_argument("--noise", action="store_true", help="力矩加高斯噪声")
+    parser.add_argument("--noise", action="store_true", help="力矩加随机噪声（默认：高斯+拉普拉斯混合，更重尾）")
+    parser.add_argument("--noise-sigma", type=float, default=None, help="高斯分量标准差 (Nm)，默认见 SimulationConfig")
+    parser.add_argument("--noise-seed", type=int, default=None, help="噪声随机种子；不设则每次采集噪声不同")
+    parser.add_argument("--noise-gaussian-only", action="store_true", help="仅加高斯白噪声，不混合拉普拉斯")
     parser.add_argument("--save-data", type=str, default=None, help="保存采集数据")
     parser.add_argument("--load-data", type=str, default=None, help="加载已有数据")
     parser.add_argument("--model-root", type=str, default=None, help="MuJoCo 模型根目录 (如 learn_robot/mujoco/franka_emika_panda)")
@@ -55,6 +58,9 @@ def main():
             use_harmonic=args.harmonic,
             n_periods=args.n_periods,
             add_noise=args.noise,
+            noise_sigma=args.noise_sigma,
+            noise_mix_laplace=not args.noise_gaussian_only,
+            noise_seed=args.noise_seed,
             verbose=True,
         )
         if args.save_data:
