@@ -5,6 +5,63 @@ from __future__ import annotations
 import numpy as np
 
 
+def plot_trajectory_states(
+    data: dict,
+    dof: int = 7,
+    out_path: str | None = "trajectory_states.png",
+    show: bool = True,
+    verbose: bool = True,
+):
+    """
+    绘制辨识使用轨迹的 q/qd/qdd 三张子图（单独一张图）。
+    """
+    import matplotlib
+
+    if not show:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    q = np.asarray(data["q"])[:, :dof]
+    qd = np.asarray(data["qd"])[:, :dof]
+    qdd = np.asarray(data["qdd"])[:, :dof]
+    n_samples = len(q)
+
+    time = data.get("time")
+    if time is None:
+        time = np.arange(n_samples, dtype=float)
+    else:
+        time = np.asarray(time).ravel()
+
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(11, 8))
+    series = [
+        (q, "q (rad)", "q"),
+        (qd, "qd (rad/s)", "qd"),
+        (qdd, "qdd (rad/s^2)", "qdd"),
+    ]
+    for ax, (arr, ylabel, title) in zip(axes, series):
+        for j in range(dof):
+            ax.plot(time, arr[:, j], linewidth=0.9, alpha=0.9, label=f"j{j + 1}")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.legend(ncol=min(dof, 4), fontsize=7, loc="upper right")
+    axes[-1].set_xlabel("time (s)")
+    fig.suptitle("Identification trajectory states", fontsize=12, y=0.995)
+    fig.tight_layout()
+
+    if out_path:
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    if show:
+        # 非阻塞显示，允许多个图窗同时弹出。
+        plt.show(block=False)
+        plt.pause(0.001)
+    else:
+        plt.close(fig)
+
+    if verbose:
+        print(f"  轨迹状态图: {out_path}" + ("（已显示）" if show else ""))
+
+
 def torque_prediction_rmse(
     tau_measured: np.ndarray,
     H_stack: np.ndarray,
@@ -75,8 +132,11 @@ def plot_measured_vs_identified_torque(
     if out_path:
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
     if show:
-        plt.show(block=True)
-    plt.close(fig)
+        # 非阻塞显示，允许多个图窗同时弹出。
+        plt.show(block=False)
+        plt.pause(0.001)
+    else:
+        plt.close(fig)
 
     if verbose:
         print(f"  力矩对比图: {out_path}" + ("（已显示）" if show else ""))
