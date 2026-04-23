@@ -45,13 +45,12 @@ identification/
 默认会尝试：
 - `identification/franka_emika_panda`
 - `identification/../mujoco/franka_emika_panda`
-- `/home/xiaomeng/code/learn_robot/mujoco/franka_emika_panda`
 
 ## 运行
 
 ```bash
 # 进入项目根目录
-cd /home/xiaomeng/code/identification
+cd identification
 
 # 一键流程（采集 + 辨识 + 对比）
 python scripts/main.py --harmonic [--noise] [--save-data data.npz] [--load-data data.npz]

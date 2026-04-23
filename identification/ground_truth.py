@@ -53,7 +53,6 @@ def extract_ground_truth(xml_path: str | Path | None = None, verbose: bool = Tru
         candidates = [
             Path(__file__).resolve().parents[1] / "franka_emika_panda" / "panda.xml",
             Path(__file__).resolve().parents[2] / "franka_emika_panda" / "panda.xml",
-            Path("/home/xiaomeng/code/learn_robot/mujoco/franka_emika_panda/panda.xml"),
         ]
         for p in candidates:
             if Path(p).exists():

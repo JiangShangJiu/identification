@@ -1,5 +1,6 @@
 """SymPyBotics 动力学模型与回归矩阵生成"""
 
+import os
 import sys
 from pathlib import Path
 
@@ -15,12 +16,15 @@ def _add_sympybotics_path(path=None):
         if p.is_dir() and str(p) not in sys.path:
             sys.path.insert(0, str(p))
         return
+    env_path = None
+    if "SYMPYBOTICS_PATH" in os.environ:
+        env_path = Path(os.environ["SYMPYBOTICS_PATH"])
     candidates = [
         Path(__file__).resolve().parents[2] / "model" / "SymPyBotics",
-        Path("/home/xiaomeng/code/learn_robot/model/SymPyBotics"),
+        env_path,
     ]
     for p in candidates:
-        if p.is_dir() and str(p) not in sys.path:
+        if p is not None and p.is_dir() and str(p) not in sys.path:
             sys.path.insert(0, str(p))
             break
 

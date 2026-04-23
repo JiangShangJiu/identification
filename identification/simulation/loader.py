@@ -42,7 +42,6 @@ def _find_model_root(model_file: str) -> Path:
     candidates = [
         pkg_dir.parent / "franka_emika_panda",
         pkg_dir.parent / "mujoco" / "franka_emika_panda",
-        Path("/home/xiaomeng/code/learn_robot/mujoco/franka_emika_panda"),
     ]
     for root in candidates:
         if root.is_dir() and (root / model_file).exists():
