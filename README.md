@@ -24,8 +24,19 @@ identification/
 ├── scripts/                  # CLI 入口
 │   ├── main.py               # 一键流程
 │   └── collect.py            # 仅采集数据
+├── docs/                     # 参考资料（Git LFS）
+│   └── Khalil_Dombre_Modeling_Identification_and_Control_of_Robots.pdf
 ├── requirements.txt
 └── README.md
+```
+
+克隆后请初始化子模块，并确保已安装 [Git LFS](https://git-lfs.com)（参考书 PDF 通过 LFS 管理）：
+
+```bash
+git clone git@github.com:JiangShangJiu/identification.git
+cd identification
+git lfs install
+git submodule update --init --recursive
 ```
 
 ## 依赖
