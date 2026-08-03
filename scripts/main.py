@@ -129,8 +129,19 @@ def main():
         help="验证轨时间相位偏移（秒）",
     )
     parser.add_argument("--no-val", action="store_true", help="不采验证轨，力矩图仍用辨识轨（不推荐）")
-    parser.add_argument("--plot", action="store_true", default=True, help="绘图（默认开启）：辨识轨+验证轨力矩对比")
-    parser.add_argument("--plot-traj-out", type=str, default="trajectory_states.png", help="验证轨状态图保存路径（q/qd/qdd）")
+    parser.add_argument("--plot", action="store_true", default=True, help="绘图（默认开启）：辨识/验证轨状态 + 力矩对比")
+    parser.add_argument(
+        "--plot-traj-id-out",
+        type=str,
+        default="trajectory_states_id.png",
+        help="辨识轨（harmonic）状态图保存路径 q/qd/qdd",
+    )
+    parser.add_argument(
+        "--plot-traj-out",
+        type=str,
+        default="trajectory_states_val.png",
+        help="验证轨（默认 sine）状态图保存路径 q/qd/qdd",
+    )
     parser.add_argument("--plot-out", type=str, default="torque_compare.png", help="验证轨力矩对比图保存路径")
     parser.add_argument(
         "--plot-id-out",
@@ -243,7 +254,17 @@ def main():
             plot_measured_vs_identified_torque,
         )
 
-        print("\n[5] 辨识轨力矩对比（训练集再测）")
+        print("\n[5] 辨识轨状态图 (q / qd / qdd，harmonic)")
+        plot_trajectory_states(
+            data_train,
+            dof=7,
+            out_path=args.plot_traj_id_out,
+            show=not args.plot_no_show,
+            verbose=True,
+            title="Identification trajectory states (harmonic)",
+        )
+
+        print("\n[6] 辨识轨力矩对比（训练集再测）")
         plot_measured_vs_identified_torque(
             data_train,
             H_train,
@@ -252,22 +273,23 @@ def main():
             out_path=args.plot_id_out,
             show=not args.plot_no_show,
             verbose=True,
-            title="Torque: measured vs identified (identification trajectory)",
+            title="Torque: measured vs identified (identification: harmonic)",
         )
 
         if args.no_val:
-            print("\n[6] 已跳过验证轨（--no-val）")
+            print("\n[7] 已跳过验证轨（--no-val）")
         else:
-            print(f"\n[6] 验证轨状态图 (q / qd / qdd，{args.val_traj})")
+            print(f"\n[7] 验证轨状态图 (q / qd / qdd，{args.val_traj})")
             plot_trajectory_states(
                 data_val,
                 dof=7,
                 out_path=args.plot_traj_out,
                 show=not args.plot_no_show,
                 verbose=True,
+                title=f"Validation trajectory states ({args.val_traj})",
             )
 
-            print(f"\n[7] 验证轨力矩对比 (τ_measured vs H·π̂，{args.val_traj})")
+            print(f"\n[8] 验证轨力矩对比 (τ_measured vs H·π̂，{args.val_traj})")
             plot_measured_vs_identified_torque(
                 data_val,
                 H_val,
