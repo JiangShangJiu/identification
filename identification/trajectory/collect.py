@@ -12,35 +12,46 @@ def make_trajectory_for_collect(
     n_periods: int = 3,
     trajectory_type: str = "sine",
     dof: int = 7,
+    time_offset: float = 0.0,
 ) -> tuple:
     """
     生成采集用轨迹，返回 (time, q, qd, qdd)
 
     trajectory_type: sine|polynomial|random（仅 use_harmonic=False 时有效）
+    time_offset: 谐波/正弦的时间相位偏移（秒）
     """
     if duration is None:
         duration = n_periods * HARMONIC_PERIOD if use_harmonic else 10.0
 
     if use_harmonic:
         from .generators import HarmonicExcitationTrajectory
-        gen = HarmonicExcitationTrajectory(dof=dof, duration=duration, dt=dt)
+
+        gen = HarmonicExcitationTrajectory(
+            dof=dof, duration=duration, dt=dt, time_offset=time_offset
+        )
         traj = gen.generate()
         return traj["time"], traj["q"], traj["qd"], traj["qdd"]
 
-    from .generators import generate_trajectory
+    from .generators import SinusoidalTrajectory, generate_trajectory
+
+    if trajectory_type == "sine":
+        # 各关节不同频率的正弦；与论文多谐波激励结构明显不同
+        gen = SinusoidalTrajectory(dof=dof, duration=duration, dt=dt)
+        if abs(time_offset) > 1e-12:
+            gen.phase_offsets = np.asarray(gen.phase_offsets, dtype=float) + (
+                2.0 * np.pi * np.asarray(gen.frequencies, dtype=float) * float(time_offset)
+            )
+        traj = gen.generate()
+        return traj["time"], traj["q"], traj["qd"], traj["qdd"]
+
     if trajectory_type in ("polynomial", "random"):
         traj = generate_trajectory(trajectory_type, dof=dof, duration=duration, dt=dt)
+        if abs(time_offset) > 1e-12:
+            n = len(traj["time"])
+            shift = int(round(float(time_offset) / dt)) % n
+            if shift:
+                for key in ("q", "qd", "qdd"):
+                    traj[key] = np.roll(traj[key], -shift, axis=0)
         return traj["time"], traj["q"], traj["qd"], traj["qdd"]
-    else:
-        # 简单正弦
-        t = np.arange(0, duration + dt * 0.5, dt)
-        omega = 0.3 * 2 * np.pi
-        q0 = np.array([0.0, -0.3, 0.0, -1.5, 0.0, 1.5, 0.0])[:dof]
-        amp = np.array([0.3] * dof)
-        phase = np.linspace(0, 2 * np.pi, dof, endpoint=False)
-        q = q0 + amp * np.sin(omega * t[:, None] + phase)
-        qd = amp * omega * np.cos(omega * t[:, None] + phase)
-        qdd = -amp * omega**2 * np.sin(omega * t[:, None] + phase)
-        return t, q, qd, qdd
 
-    return traj["time"], traj["q"], traj["qd"], traj["qdd"]
+    raise ValueError(f"未知 trajectory_type={trajectory_type!r}")

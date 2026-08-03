@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 def load_mujoco_model(
-    model_file: str = "scene.xml",
+    model_file: str = "panda.xml",
     model_root: Path | str | None = None,
 ):
     """

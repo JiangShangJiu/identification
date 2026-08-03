@@ -8,10 +8,12 @@ from dataclasses import dataclass, field
 class SimulationConfig:
     """MuJoCo 仿真与数据采集配置"""
 
-    model_path: str | Path = "scene.xml"
+    # 辨识用逆动力学：不要用带地板的 scene.xml，否则大幅值轨迹穿模会产生虚假巨大力矩
+    model_path: str | Path = "panda.xml"
     model_root: str | Path | None = None
     dof: int = 7
     torque_noise_sigma: float = 2.0
+    disable_contact: bool = True
 
     def resolve_model_root(self) -> Path:
         """解析模型根目录"""

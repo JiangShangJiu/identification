@@ -52,9 +52,22 @@ class TrajectoryGenerator:
 class SinusoidalTrajectory(TrajectoryGenerator):
     def __init__(self, dof=7, duration=10.0, dt=0.01, amplitudes=None, frequencies=None, phase_offsets=None):
         super().__init__(dof, duration, dt)
-        self.amplitudes = np.array(amplitudes) if amplitudes is not None else 0.3 * (self.q_max - self.q_min)
-        self.frequencies = np.array(frequencies) if frequencies is not None else np.array([0.1, 0.12, 0.15, 0.18, 0.2, 0.22, 0.25])[:dof]
-        self.phase_offsets = np.array(phase_offsets) if phase_offsets is not None else np.linspace(0, 2 * np.pi, dof, endpoint=False)
+        # 验证轨：频率明显高于辨识多谐波基频(~0.075Hz)，幅度按速度上限缩放
+        self.frequencies = np.array(frequencies) if frequencies is not None else np.array(
+            [0.25, 0.32, 0.40, 0.48, 0.55, 0.62, 0.70]
+        )[:dof]
+        self.phase_offsets = (
+            np.array(phase_offsets)
+            if phase_offsets is not None
+            else np.linspace(0, 2 * np.pi, dof, endpoint=False) + 0.7
+        )
+        if amplitudes is not None:
+            self.amplitudes = np.array(amplitudes, dtype=float)[:dof]
+        else:
+            # A * 2πf ≤ 0.85 * qd_max，并限制在关节行程的 20% 内
+            a_vel = 0.85 * self.qd_max / (2.0 * np.pi * np.maximum(self.frequencies, 1e-6))
+            a_pos = 0.20 * (self.q_max - self.q_min)
+            self.amplitudes = np.minimum(a_vel, a_pos)
 
     def generate(self):
         q = self.q0 + self.amplitudes * np.sin(2 * np.pi * self.frequencies * self.time[:, None] + self.phase_offsets)
@@ -111,7 +124,8 @@ class RandomTrajectory(TrajectoryGenerator):
 
 class HarmonicExcitationTrajectory(TrajectoryGenerator):
     def __init__(self, dof=7, duration=10.0, dt=0.01, n_harmonics=5, omega_f=0.15 * np.pi,
-                 a_coeffs=None, b_coeffs=None, q0=None, scale_to_limits=True, random_seed=None):
+                 a_coeffs=None, b_coeffs=None, q0=None, scale_to_limits=True, random_seed=None,
+                 time_offset: float = 0.0):
         paper = get_paper_fourier_params()
         if a_coeffs is None and b_coeffs is None:
             a_coeffs = paper["a_coeffs"]
@@ -122,6 +136,7 @@ class HarmonicExcitationTrajectory(TrajectoryGenerator):
         self.n_harmonics = n_harmonics
         self.omega_f = omega_f
         self.scale_to_limits = scale_to_limits
+        self.time_offset = float(time_offset)
         rng = np.random.default_rng(random_seed)
         if a_coeffs is None or b_coeffs is None:
             base_amp = 0.2 * self.qd_max
@@ -136,7 +151,7 @@ class HarmonicExcitationTrajectory(TrajectoryGenerator):
         qdd = np.zeros((self.n_samples, self.dof))
         k_arr = np.arange(1, self.n_harmonics + 1, dtype=float)
         for i in range(self.n_samples):
-            t = self.time[i]
+            t = self.time[i] + self.time_offset
             kwt = np.outer(k_arr, np.ones(self.dof)) * (self.omega_f * t)
             sk, ck = np.sin(kwt), np.cos(kwt)
             q[i] = self.q0 + np.sum((a / (k_arr[:, None] * self.omega_f)) * sk - (b / (k_arr[:, None] * self.omega_f)) * ck, axis=0)

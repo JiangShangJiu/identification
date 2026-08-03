@@ -33,9 +33,70 @@ def _ema_filter(x: np.ndarray, alpha: float) -> np.ndarray:
     return y
 
 
+def _zero_phase_lowpass(x: np.ndarray, dt: float, cutoff_hz: float, order: int = 4) -> np.ndarray:
+    """零相位 Butterworth 低通（离线辨识标准做法）。优先 Gustaffson 延拓以减轻端点效应。"""
+    from scipy.signal import butter, filtfilt
+
+    x = np.asarray(x, dtype=float)
+    fs = 1.0 / float(dt)
+    nyq = 0.5 * fs
+    wn = min(max(float(cutoff_hz) / nyq, 1e-6), 0.99)
+    b, a = butter(int(order), wn, btype="low")
+    padlen = min(3 * max(len(a), len(b)), max(0, len(x) - 1))
+
+    def _filt(sig: np.ndarray) -> np.ndarray:
+        try:
+            return filtfilt(b, a, sig, method="gust")
+        except TypeError:
+            return filtfilt(b, a, sig, padlen=padlen)
+
+    if x.ndim == 1:
+        return _filt(x)
+    out = np.empty_like(x, dtype=float)
+    for j in range(x.shape[1]):
+        out[:, j] = _filt(x[:, j])
+    return out
+
+
+def _trim_edge_samples(data: dict, n_trim: int) -> dict:
+    """去掉首尾各 n_trim 个采样，抑制滤波边界暂态。"""
+    if n_trim <= 0:
+        return data
+    n = len(data["time"])
+    if 2 * n_trim >= n:
+        raise ValueError(f"edge trim 过大: n_trim={n_trim}, n_samples={n}")
+    sl = slice(n_trim, n - n_trim)
+    out = {}
+    for k, v in data.items():
+        arr = np.asarray(v)
+        if arr.ndim >= 1 and len(arr) == n:
+            out[k] = arr[sl]
+        else:
+            out[k] = v
+    return out
+
+
+def _estimate_states_butterworth(
+    q_noisy: np.ndarray,
+    dt: float,
+    cutoff_hz: float = 3.0,
+    order: int = 4,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    由含噪位置估计 (q, qd, qdd)：
+    先对 q 零相位低通，再差分；每次差分后再低通，抑制噪声放大。
+    """
+    q_f = _zero_phase_lowpass(q_noisy, dt, cutoff_hz, order=order)
+    qd = np.gradient(q_f, dt, axis=0)
+    qd_f = _zero_phase_lowpass(qd, dt, cutoff_hz, order=order)
+    qdd = np.gradient(qd_f, dt, axis=0)
+    qdd_f = _zero_phase_lowpass(qdd, dt, cutoff_hz, order=order)
+    return q_f, qd_f, qdd_f
+
+
 def collect_data(
     config: SimulationConfig | None = None,
-    model_file: str = "scene.xml",
+    model_file: str = "panda.xml",
     model_root: str | Path | None = None,
     dof: int = 7,
     duration: float | None = None,
@@ -43,11 +104,12 @@ def collect_data(
     use_harmonic: bool = True,
     n_periods: int = 3,
     trajectory_type: str = "sine",
+    traj_time_offset: float = 0.0,
     add_noise: bool = False,
     noise_sigma: float | None = None,
     noise_mix_laplace: bool = True,
     noise_laplace_ratio: float = 0.55,
-    noise_seed: int | None = None,
+    noise_seed: int | None = 0,
     add_friction: bool = True,
     coulomb_friction=None,
     viscous_friction=None,
@@ -57,12 +119,17 @@ def collect_data(
     stribeck_velocity: float = 0.10,
     add_nonlinear_friction: bool = True,
     nonlinear_friction_scale: float = 0.03,
-    nonlinear_friction_seed: int | None = None,
+    nonlinear_friction_seed: int | None = 0,
     add_state_noise: bool = True,
     state_noise_sigma_q: float = 8e-4,
-    state_noise_seed: int | None = None,
+    state_noise_seed: int | None = 0,
+    state_derivative_mode: str = "butterworth",
+    state_filter_cutoff_hz: float = 3.0,
+    state_filter_order: int = 4,
     state_vel_ema_alpha: float = 0.25,
     state_acc_ema_alpha: float = 0.2,
+    filter_torque: bool = True,
+    edge_trim_sec: float | None = None,
     trajectory_factory=None,
     verbose: bool = True,
 ) -> dict:
@@ -76,11 +143,12 @@ def collect_data(
         use_harmonic: 是否用多谐波轨迹
         n_periods: 多谐波周期数
         trajectory_type: sine|polynomial|random（非 harmonic 时）
+        traj_time_offset: 轨迹时间相位偏移（秒），用于生成与辨识不同的验证轨迹
         add_noise: 是否在力矩上加随机噪声
         noise_sigma: 高斯分量标准差 (Nm)，默认取 config.torque_noise_sigma
         noise_mix_laplace: 是否再叠加拉普拉斯噪声（更重尾、抖动更“乱”）
         noise_laplace_ratio: 拉普拉斯尺度 = sigma * 该系数
-        noise_seed: 随机种子；None 表示每次运行噪声不同
+        noise_seed: 随机种子；默认 0（可复现）；显式传 None 则每次不同
         add_friction: 是否叠加摩擦力矩（库仑+粘性，可附加随机非线性项）
         coulomb_friction: 库仑摩擦系数（标量或 shape=(dof,)；None 则默认 0.20 Nm）
         viscous_friction: 粘性摩擦系数（标量或 shape=(dof,)；None 则默认 0.05 Nms/rad）
@@ -90,12 +158,20 @@ def collect_data(
         stribeck_velocity: Stribeck 特征速度（越小则低速突起区越窄）
         add_nonlinear_friction: 是否叠加随机非线性摩擦项
         nonlinear_friction_scale: 非线性摩擦强度系数（越大越“非线性”）
-        nonlinear_friction_seed: 非线性摩擦随机种子；None 表示每次运行不同
+        nonlinear_friction_seed: 非线性摩擦随机种子；默认 0
         add_state_noise: 是否给状态量添加测量噪声（默认开启）
         state_noise_sigma_q: 关节位置噪声标准差 (rad)
-        state_noise_seed: 状态噪声随机种子；None 表示每次运行不同
-        state_vel_ema_alpha: 对差分得到的 qd 做 EMA 平滑系数
-        state_acc_ema_alpha: 对差分得到的 qdd 做 EMA 平滑系数
+        state_noise_seed: 状态噪声随机种子；默认 0
+        state_derivative_mode: 含噪位置下 qd/qdd 估计方式
+            - butterworth: 零相位低通 + 差分（离线辨识推荐，默认）
+            - ema: 裸差分 + EMA（旧实现，噪声会被严重放大）
+            - reference: 位置用测量值（可滤波），速度/加速度用参考轨迹
+        state_filter_cutoff_hz: Butterworth 截止频率 (Hz)；应高于轨迹带宽、远低于 Nyquist
+        state_filter_order: Butterworth 阶数
+        state_vel_ema_alpha: mode=ema 时 qd 的 EMA 平滑系数
+        state_acc_ema_alpha: mode=ema 时 qdd 的 EMA 平滑系数
+        filter_torque: butterworth/reference 时是否对 τ 做同截止频率零相位滤波（保持线性关系）
+        edge_trim_sec: 滤波后丢弃首尾时长（秒）。None 时对 butterworth/reference 自动取 max(1.0, 3/fc)
         trajectory_factory: 自定义轨迹生成函数 (duration, dt) -> (t, q, qd, qdd)
         verbose: 是否打印
 
@@ -122,6 +198,7 @@ def collect_data(
             n_periods=n_periods,
             trajectory_type=trajectory_type,
             dof=dof,
+            time_offset=traj_time_offset,
         )
 
     n_samples = len(t_arr)
@@ -131,11 +208,16 @@ def collect_data(
         model_file=str(cfg.model_path),
         model_root=_model_root,
     )
+    disable_contact = bool(getattr(cfg, "disable_contact", True))
+    if disable_contact:
+        model.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
 
     tau_arr = np.zeros((n_samples, dof))
     if verbose:
         traj_name = "harmonic" if use_harmonic else trajectory_type
-        print(f"采集数据: {n_samples} 点, dt={dt}s, trajectory={traj_name}")
+        off_msg = f", traj_offset={traj_time_offset:.3f}s" if abs(traj_time_offset) > 1e-12 else ""
+        print(f"采集数据: {n_samples} 点, dt={dt}s, trajectory={traj_name}{off_msg}")
+        print(f"  模型: {cfg.model_path}" + ("（已禁用接触）" if disable_contact else ""))
 
     for i in range(n_samples):
         data.qpos[:dof] = q_arr[i]
@@ -204,20 +286,66 @@ def collect_data(
     q_meas = q_true
     qd_meas = qd_true
     qdd_meas = qdd_true
+    mode = str(state_derivative_mode).lower().strip()
 
     if add_state_noise:
         rng_state = np.random.default_rng(state_noise_seed)
-        q_meas = q_true + rng_state.normal(0.0, float(state_noise_sigma_q), size=q_true.shape)
-        qd_meas = np.gradient(q_meas, dt, axis=0)
-        qdd_meas = np.gradient(qd_meas, dt, axis=0)
-        qd_meas = _ema_filter(qd_meas, state_vel_ema_alpha)
-        qdd_meas = _ema_filter(qdd_meas, state_acc_ema_alpha)
+        q_noisy = q_true + rng_state.normal(0.0, float(state_noise_sigma_q), size=q_true.shape)
+        if mode == "butterworth":
+            q_meas, qd_meas, qdd_meas = _estimate_states_butterworth(
+                q_noisy,
+                dt=dt,
+                cutoff_hz=state_filter_cutoff_hz,
+                order=state_filter_order,
+            )
+            if filter_torque:
+                tau_arr = _zero_phase_lowpass(
+                    tau_arr, dt, state_filter_cutoff_hz, order=state_filter_order
+                )
+        elif mode == "ema":
+            q_meas = q_noisy
+            qd_meas = np.gradient(q_meas, dt, axis=0)
+            qdd_meas = np.gradient(qd_meas, dt, axis=0)
+            qd_meas = _ema_filter(qd_meas, state_vel_ema_alpha)
+            qdd_meas = _ema_filter(qdd_meas, state_acc_ema_alpha)
+        elif mode == "reference":
+            # 实际中闭环跟踪较好时，常用参考 qd/qdd + 测量 q
+            q_meas = _zero_phase_lowpass(
+                q_noisy, dt, state_filter_cutoff_hz, order=state_filter_order
+            )
+            qd_meas = qd_true
+            qdd_meas = qdd_true
+            if filter_torque:
+                tau_arr = _zero_phase_lowpass(
+                    tau_arr, dt, state_filter_cutoff_hz, order=state_filter_order
+                )
+        else:
+            raise ValueError(
+                f"未知 state_derivative_mode={state_derivative_mode!r}，"
+                "可选: butterworth | ema | reference"
+            )
         if verbose:
             seed_info = f", seed={state_noise_seed}" if state_noise_seed is not None else ", seed=None(每次不同)"
             print(f"  状态加噪: q ~ N(0,{state_noise_sigma_q}^2){seed_info}")
-            print(f"  状态平滑: EMA(alpha_qd={state_vel_ema_alpha:.3f}, alpha_qdd={state_acc_ema_alpha:.3f})")
+            if mode == "butterworth":
+                print(
+                    f"  状态估计: Butterworth 零相位低通+差分 "
+                    f"(fc={state_filter_cutoff_hz:.2f} Hz, order={state_filter_order}"
+                    f"{', 同步滤波 τ' if filter_torque else ''})"
+                )
+            elif mode == "ema":
+                print(
+                    f"  状态平滑: EMA(alpha_qd={state_vel_ema_alpha:.3f}, "
+                    f"alpha_qdd={state_acc_ema_alpha:.3f})"
+                )
+            else:
+                print(
+                    f"  状态估计: reference qd/qdd + 滤波 q "
+                    f"(fc={state_filter_cutoff_hz:.2f} Hz"
+                    f"{', 同步滤波 τ' if filter_torque else ''})"
+                )
 
-    return {
+    out = {
         "time": t_arr,
         "q": q_meas,
         "qd": qd_meas,
@@ -227,6 +355,21 @@ def collect_data(
         "qd_true": qd_true,
         "qdd_true": qdd_true,
     }
+
+    # 滤波边界暂态：丢弃首尾一段，避免图上开头/结尾明显不重合
+    need_trim = add_state_noise and mode in ("butterworth", "reference")
+    if need_trim:
+        if edge_trim_sec is None:
+            trim_sec = max(1.0, 3.0 / max(float(state_filter_cutoff_hz), 1e-6))
+        else:
+            trim_sec = float(edge_trim_sec)
+        n_trim = int(round(trim_sec / float(dt)))
+        if n_trim > 0:
+            out = _trim_edge_samples(out, n_trim)
+            if verbose:
+                print(f"  已裁剪滤波边界: 首尾各 {trim_sec:.2f}s ({n_trim} 点)")
+
+    return out
 
 
 class SimulationCollector:
